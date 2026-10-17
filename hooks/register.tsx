@@ -215,7 +215,7 @@ export const register: Register = on => {
         {shown.length === 0 && <Text dimColor>No open tasks.</Text>}
         {shown.map((task, index) =>
           Input !== undefined && task.line === editing ? (
-            <Box key={`row:${index}`} flexDirection="row" columnGap={1}>
+            <Box flexDirection="row" columnGap={1}>
               <Input
                 key="edit"
                 value={task.line}
@@ -230,7 +230,8 @@ export const register: Register = on => {
               <Button key="cancel" label="cancel" plain dimColor onPress={() => void refresh($, { editing: null })} />
             </Box>
           ) : (
-            <Box key={`row:${index}`} flexDirection="row" columnGap={1}>
+            // no `key` on the row: a keyed Box (a hover group) holding a Button does not draw on the desktop surface
+            <Box flexDirection="row" columnGap={1}>
               <Text color={color(task.priority)}>{task.priority ? `(${task.priority})` : ' · '}</Text>
               <Box flexGrow={1} flexShrink={1}>
                 <Text wrap="wrap">{words(task.text)}</Text>
