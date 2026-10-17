@@ -1,0 +1,9 @@
+{
+  "name": "todo-txt",
+  "version": "0.1.0",
+  "description": "Keeps a todo.txt in the project root from the tasks the user and the agent mention, and shows it in a pane",
+  "author": {
+    "name": "tamtamchik"
+  },
+  "types": "./types/index.d.ts"
+}

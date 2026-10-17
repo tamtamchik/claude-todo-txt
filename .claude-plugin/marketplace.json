@@ -1,0 +1,13 @@
+{
+  "name": "claude-todo-txt",
+  "owner": {
+    "name": "tamtamchik"
+  },
+  "description": "todo-txt: a todo.txt pane for Claude Code, kept from the tasks the user and the agent mention",
+  "plugins": [
+    {
+      "name": "todo-txt",
+      "source": "./"
+    }
+  ]
+}
