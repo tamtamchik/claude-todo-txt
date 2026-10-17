@@ -2,7 +2,7 @@
 //   (A) 2026-10-17 Task text +project @context
 //   x 2026-10-18 2026-10-17 Task text pri:A
 
-export type Task = { priority: string | null; created: string | null; text: string }
+export type Task = { line: string; priority: string | null; created: string | null; text: string }
 
 const OPEN = /^(?:\(([A-Z])\) )?(?:(\d{4}-\d{2}-\d{2}) )?(.+)$/
 
@@ -12,8 +12,8 @@ export function lines(text: string): string[] {
 
 export function parseTask(line: string): Task {
   const m = OPEN.exec(line.trim())
-  if (!m) return { priority: null, created: null, text: line.trim() }
-  return { priority: m[1] ?? null, created: m[2] ?? null, text: m[3] ?? '' }
+  if (!m) return { line, priority: null, created: null, text: line.trim() }
+  return { line, priority: m[1] ?? null, created: m[2] ?? null, text: m[3] ?? '' }
 }
 
 export function openTasks(text: string): Task[] {
@@ -69,4 +69,18 @@ export function parseChange(reply: string): Change {
     ? obj.done.filter((n): n is number => Number.isInteger(n) && (n as number) > 0)
     : []
   return { add, done }
+}
+
+// Filters: `+project` and `@context` match a word of the line, a single capital
+// letter matches the priority, anything else is a case-insensitive substring.
+export function tagsOf(line: string): string[] {
+  return line.split(/\s+/).filter(word => /^[+@]\S+$/.test(word))
+}
+
+export function matches(line: string, priority: string | null, tokens: string[]): boolean {
+  return tokens.every(token => {
+    if (/^[+@]/.test(token)) return tagsOf(line).includes(token)
+    if (/^[A-Z]$/.test(token)) return priority === token
+    return line.toLowerCase().includes(token.toLowerCase())
+  })
 }

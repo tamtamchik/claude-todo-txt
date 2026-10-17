@@ -31,8 +31,8 @@ function fakeTurns(on: On) {
 test('parses and formats todo.txt lines', async () => {
   const open = openTasks('(A) 2026-10-01 Fix login +auth\nx 2026-10-02 2026-10-01 Old\n\nWrite docs @home\n')
   expect(open).toEqual([
-    { priority: 'A', created: '2026-10-01', text: 'Fix login +auth' },
-    { priority: null, created: null, text: 'Write docs @home' },
+    { line: '(A) 2026-10-01 Fix login +auth', priority: 'A', created: '2026-10-01', text: 'Fix login +auth' },
+    { line: 'Write docs @home', priority: null, created: null, text: 'Write docs @home' },
   ])
   expect(formatNew('Add tests', 'B', '2026-10-17')).toBe('(B) 2026-10-17 Add tests')
   expect(formatDone('(A) 2026-10-01 Fix login +auth', '2026-10-17')).toBe('x 2026-10-17 2026-10-01 Fix login +auth pri:A')
@@ -143,16 +143,74 @@ test('/todo done switches the pane to done.txt and /todo back', async ($, on) =>
       props: { title: 'todo.txt', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
     })
 
-  expect((await run('done')).text).toBe('done.txt: 1 done')
+  expect((await run('done')).text).toBe('done.txt: 1 of 1 done')
   let ui = await mount()
   let texts = (await ui.findAll({ type: 'Text' })).map(row => row.text)
   expect(texts).toContain('2026-10-03 2026-10-01 Fix login pri:A')
   expect(texts.some(t => t.includes('Write docs'))).toBe(false)
   await ui.unmount()
 
-  expect((await run('')).text).toBe('todo.txt: 1 open, 1 done')
+  expect((await run('')).text).toBe('todo.txt: 1 of 1 open')
   ui = await mount()
   texts = (await ui.findAll({ type: 'Text' })).map(row => row.text)
   expect(texts).toContain('Write docs')
   await ui.unmount()
+})
+
+const PANE = {
+  plugin: 'todo-txt',
+  component: 'Pane',
+  requestId: 'todo-txt',
+  props: { title: 'todo.txt', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+} as const
+
+test('filter chips and /todo tokens narrow the list', async ($, on) => {
+  const files = new Map<string, string>([
+    ['todo.txt', '(A) 2026-10-01 Fix login +auth @backend\n(B) 2026-10-02 Write docs +docs\n2026-10-03 Tidy up +docs @home\n'],
+  ])
+  fakeFs(on, files)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const run = (args: string) =>
+    $.command.run({ command: 'todo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+  expect((await run('+docs @home')).text).toBe('todo.txt: 1 of 3 open matching +docs @home')
+  for (const surface of ['terminal', 'desktop'] as const) {
+    await run('')
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const texts = async () => (await ui.findAll({ type: 'Text' })).map(row => row.text)
+    expect((await texts()).some(t => t.includes('Fix login'))).toBe(true)
+    await ui.press({ key: 'f:+docs' })
+    expect((await texts()).some(t => t.includes('Fix login'))).toBe(false)
+    expect((await texts()).some(t => t.includes('Write docs'))).toBe(true)
+    await ui.press({ key: 'f:B' })
+    expect((await texts()).some(t => t.includes('Tidy up'))).toBe(false)
+    expect((await texts()).some(t => t.includes('1 of 3 open'))).toBe(true)
+    await ui.press({ key: 'f:clear' })
+    expect((await texts()).some(t => t.includes('3 of 3 open'))).toBe(true)
+    await ui.unmount()
+  }
+})
+
+test('edit replaces one line of todo.txt in place', async ($, on) => {
+  const files = new Map<string, string>([
+    ['todo.txt', '# notes\n\n(A) 2026-10-01 Fix login +auth\n2026-10-02 Write docs\n'],
+  ])
+  fakeFs(on, files)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.command.run({ command: 'todo', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // rows sorted by priority: (A) Fix login, then '# notes' and 'Write docs' in file order
+    await ui.press({ key: 'e:2' })
+    expect(await ui.find({ type: 'Input', key: 'edit' })).toBeDefined()
+    await ui.input({ key: 'edit', text: '(B) 2026-10-02 Write docs +docs' })
+    expect(files.get('todo.txt')).toBe('# notes\n\n(A) 2026-10-01 Fix login +auth\n(B) 2026-10-02 Write docs +docs\n')
+    expect(await ui.find({ type: 'Input', key: 'edit' })).toBeUndefined()
+    await ui.press({ key: 'e:0' })
+    await ui.press({ key: 'cancel' })
+    expect(await ui.find({ type: 'Input', key: 'edit' })).toBeUndefined()
+    files.set('todo.txt', '# notes\n\n(A) 2026-10-01 Fix login +auth\n2026-10-02 Write docs\n')
+    await $.command.run({ command: 'todo', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    await ui.unmount()
+  }
 })

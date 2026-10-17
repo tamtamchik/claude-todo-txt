@@ -30,9 +30,11 @@ In the desktop app, where `/plugin` does not run: click **+** next to the prompt
 ## Use
 
 - The `todo.txt` pane opens on session start when the terminal is wide enough for a sidebar. `/todo` opens or focuses it at any width.
-- `/todo done` switches the pane to `done.txt`; `/todo` switches it back.
+- The pane lists open tasks sorted by priority, text wrapped, `+project` and `@context` in their own colors, with the counts and the last sync result.
+- Filters: the chips above the list toggle a `+project`, `@context` or priority; `clear` resets. `/todo +api @home B` sets the same filter from the prompt, and `/todo` clears it. A task shows when it matches every token; a token that is not a tag or a priority letter matches as a substring.
+- Edit: `edit` at the end of a row turns it into a field holding the raw line; Enter saves it in place, `cancel` leaves it. Not on mobile, which draws no input field.
+- `/todo done` switches the pane to `done.txt`, with the same filters; `/todo` switches it back.
 - `/todo add <task>` appends a task with today's date.
-- The pane lists open tasks sorted by priority, with the count of open and done tasks and the last sync result.
 
 Line format:
 

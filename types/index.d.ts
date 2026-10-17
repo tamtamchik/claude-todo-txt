@@ -1,5 +1,12 @@
-export type TodoTask = { priority: string | null; text: string }
-export type TodoView = { mode: 'open' | 'done'; open: TodoTask[]; closed: string[]; last: string | null }
+export type TodoTask = { line: string; priority: string | null; text: string }
+export type TodoView = {
+  mode: 'open' | 'done'
+  open: TodoTask[]
+  closed: string[]
+  filter: string[]
+  editing: string | null
+  last: string | null
+}
 
 declare module 'claude-code' {
   interface PluginState {
