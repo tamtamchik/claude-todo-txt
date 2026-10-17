@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register, EngineInterface } from 'claude-code'
+import type { Register, EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { TodoTask, TodoView } from '../types'
 import { byPriority, formatDone, formatNew, lines, matches, openTasks, parseChange, tagsOf } from './todo'
@@ -7,6 +7,8 @@ import { byPriority, formatDone, formatNew, lines, matches, openTasks, parseChan
 const PANE = 'todo-txt'
 const TODO = 'todo.txt'
 const DONE = 'done.txt'
+// the desktop surface drops a pane tree of about 40,000 bytes or more without a word: keep well under
+const MAX_TREE_BYTES = 32_000
 
 const EMPTY: TodoView = { mode: 'open', open: [], closed: [], filter: [], editing: null, last: null }
 const view = atom({ plugin: 'todo-txt', key: 'view' } as const, EMPTY)
@@ -142,118 +144,144 @@ export const register: Register = on => {
     return { text: `${mode === 'done' ? DONE : TODO}: ${shown} of ${of} ${mode}${scope}` }
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const elements = $.ui.resolve(e)
-    const { Box, Text, Button } = elements
-    // mobile draws no Input: there the rows are read-only
-    const Input = 'Input' in elements ? elements.Input : undefined
-    const { mode, open, closed, filter, editing, last } = await current($)
-    const color = (priority: string | null) =>
-      priority === 'A' ? 'error' : priority === 'B' ? 'warning' : priority === 'C' ? 'suggestion' : 'subtle'
-    const toggle = (token: string) =>
-      update($, view, v => ({
-        ...EMPTY,
-        ...v,
-        filter: (v.filter ?? []).includes(token) ? v.filter.filter(t => t !== token) : [...(v.filter ?? []), token],
-      }))
+  on('ui.render', { component: 'Pane', requestId: PANE }, ($, e) => draw($, e))
+}
 
-    const all = mode === 'done' ? closed : open.map(task => task.line)
-    const tags = [...new Set(all.flatMap(tagsOf))].sort()
-    const priorities = [...new Set(open.map(task => task.priority).filter((p): p is string => p !== null))].sort()
-    const chips = mode === 'done' ? tags : [...priorities, ...tags]
-    const words = (text: string) =>
-      text.split(/(\s+)/).map(word =>
-        word.startsWith('+') ? (
-          <Text color="suggestion">{word}</Text>
-        ) : word.startsWith('@') ? (
-          <Text color="planMode">{word}</Text>
-        ) : (
-          word
-        ),
-      )
+const bytesOf = (tree: unknown) => new TextEncoder().encode(JSON.stringify(tree)).length
 
-    const filterRow = chips.length > 0 && (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-        {chips.map(token => (
-          <Button
-            key={`f:${token}`}
-            label={token}
-            plain
-            dimColor={!filter.includes(token)}
-            {...(filter.includes(token) ? { variant: 'primary' as const } : {})}
-            onPress={() => void toggle(token)}
-          />
-        ))}
-        {filter.length > 0 && (
-          <Button key="f:clear" label="clear" plain onPress={() => void update($, view, v => ({ ...EMPTY, ...v, filter: [] }))} />
-        )}
-      </Box>
-    )
+async function draw($: EngineInterface, e: RenderInput<'Pane'>) {
+  const elements = $.ui.resolve(e)
+  const { Box, Text, Button } = elements
+  // mobile draws no Input: there the rows are read-only
+  const Input = 'Input' in elements ? elements.Input : undefined
+  const { mode, open, closed, filter, editing, last } = await current($)
+  const color = (priority: string | null) =>
+    priority === 'A' ? 'error' : priority === 'B' ? 'warning' : priority === 'C' ? 'suggestion' : 'subtle'
+  const toggle = (token: string) =>
+    update($, view, v => ({
+      ...EMPTY,
+      ...v,
+      filter: (v.filter ?? []).includes(token) ? v.filter.filter(t => t !== token) : [...(v.filter ?? []), token],
+    }))
 
-    if (mode === 'done') {
-      const shown = closed.filter(line => matches(line, null, filter))
-      return (
-        <Box flexDirection="column">
-          {filterRow}
-          {shown.length === 0 && <Text dimColor>No done tasks.</Text>}
-          {shown.map(line => (
-            <Text wrap="wrap" dimColor>
-              {words(line)}
-            </Text>
-          ))}
-          <Text dimColor>
-            {shown.length} of {closed.length} done · /todo for open tasks
-          </Text>
-        </Box>
-      )
+  const all = mode === 'done' ? closed : open.map(task => task.line)
+  const tags = [...new Set(all.flatMap(tagsOf))].sort()
+  const priorities = [...new Set(open.map(task => task.priority).filter((p): p is string => p !== null))].sort()
+  const chips = mode === 'done' ? tags : [...priorities, ...tags]
+  // tags get a Text of their own, the plain runs between them stay one string each
+  const words = (text: string) => {
+    const parts: RenderChildren[] = []
+    let plain = ''
+    for (const chunk of text.split(/(\s+)/)) {
+      const tag = /^\+\S/.test(chunk) ? 'suggestion' : /^@\S/.test(chunk) ? 'planMode' : null
+      if (tag === null) {
+        plain += chunk
+        continue
+      }
+      if (plain !== '') parts.push(plain)
+      plain = ''
+      parts.push(<Text color={tag}>{chunk}</Text>)
     }
+    if (plain !== '') parts.push(plain)
+    return parts
+  }
 
-    const shown = open.filter(task => matches(task.line, task.priority, filter))
+  const filterRow = chips.length > 0 && (
+    <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+      {chips.map(token => (
+        <Button
+          key={`f:${token}`}
+          label={token}
+          plain
+          dimColor={!filter.includes(token)}
+          {...(filter.includes(token) ? { variant: 'primary' as const } : {})}
+          onPress={() => void toggle(token)}
+        />
+      ))}
+      {filter.length > 0 && (
+        <Button
+          key="f:clear"
+          label="clear"
+          plain
+          onPress={() => void update($, view, v => ({ ...EMPTY, ...v, filter: [] }))}
+        />
+      )}
+    </Box>
+  )
+
+  if (mode === 'done') {
+    const shown = closed.filter(line => matches(line, null, filter))
     return (
       <Box flexDirection="column">
         {filterRow}
-        {shown.length === 0 && <Text dimColor>No open tasks.</Text>}
-        {shown.map((task, index) =>
-          Input !== undefined && task.line === editing ? (
-            <Box flexDirection="row" columnGap={1}>
-              <Input
-                key="edit"
-                value={task.line}
-                submitLabel="save"
-                autoFocus
-                onSubmit={async (value: string) => {
-                  const text = value.trim()
-                  if (text !== '' && text !== task.line) await replaceLine($, task.line, text)
-                  await refresh($, { editing: null })
-                }}
-              />
-              <Button key="cancel" label="cancel" plain dimColor onPress={() => void refresh($, { editing: null })} />
-            </Box>
-          ) : (
-            // no `key` on the row: a keyed Box (a hover group) holding a Button does not draw on the desktop surface
-            <Box flexDirection="row" columnGap={1}>
-              <Text color={color(task.priority)}>{task.priority ? `(${task.priority})` : ' · '}</Text>
-              <Box flexGrow={1} flexShrink={1}>
-                <Text wrap="wrap">{words(task.text)}</Text>
-              </Box>
-              {Input !== undefined && (
-                <Button
-                  key={`e:${index}`}
-                  label="edit"
-                  plain
-                  dimColor
-                  onPress={() => void update($, view, v => ({ ...EMPTY, ...v, editing: task.line }))}
-                />
-              )}
-            </Box>
-          ),
-        )}
+        {shown.length === 0 && <Text dimColor>No done tasks.</Text>}
+        {shown.map(line => (
+          <Text wrap="wrap" dimColor>
+            {words(line)}
+          </Text>
+        ))}
         <Text dimColor>
-          {shown.length} of {open.length} open · {closed.length} done
-          {filter.length ? ` · filter: ${filter.join(' ')}` : ''}
-          {last ? ` · last sync: ${last}` : ''}
+          {shown.length} of {closed.length} done · /todo for open tasks
         </Text>
       </Box>
     )
-  })
+  }
+
+  const shown = open.filter(task => matches(task.line, task.priority, filter))
+  const treeOf = (rows: typeof shown) => (
+    <Box flexDirection="column">
+      {filterRow}
+      {shown.length === 0 && <Text dimColor>No open tasks.</Text>}
+      {rows.map((task, index) =>
+        Input !== undefined && task.line === editing ? (
+          <Box flexDirection="row" columnGap={1}>
+            <Input
+              key="edit"
+              value={task.line}
+              submitLabel="save"
+              autoFocus
+              onSubmit={async (value: string) => {
+                const text = value.trim()
+                if (text !== '' && text !== task.line) await replaceLine($, task.line, text)
+                await refresh($, { editing: null })
+              }}
+            />
+            <Button key="cancel" label="cancel" plain dimColor onPress={() => void refresh($, { editing: null })} />
+          </Box>
+        ) : (
+          // no `key` on the row: a keyed Box (a hover group) holding a Button does not draw on the desktop surface
+          <Box flexDirection="row" columnGap={1}>
+            <Text color={color(task.priority)}>{task.priority ? `(${task.priority})` : ' · '}</Text>
+            <Box flexGrow={1} flexShrink={1}>
+              <Text wrap="wrap">{words(task.text)}</Text>
+            </Box>
+            {Input !== undefined && (
+              <Button
+                key={`e:${index}`}
+                label="edit"
+                plain
+                dimColor
+                onPress={() => void update($, view, v => ({ ...EMPTY, ...v, editing: task.line }))}
+              />
+            )}
+          </Box>
+        ),
+      )}
+      {rows.length < shown.length && (
+        <Text color="warning">… {shown.length - rows.length} more not shown: narrow the list with a filter</Text>
+      )}
+      <Text dimColor>
+        {shown.length} of {open.length} open · {closed.length} done
+        {filter.length ? ` · filter: ${filter.join(' ')}` : ''}
+        {last ? ` · last sync: ${last}` : ''}
+      </Text>
+    </Box>
+  )
+  let count = shown.length
+  let tree = treeOf(shown)
+  while (bytesOf(tree) > MAX_TREE_BYTES && count > 1) {
+    count = Math.max(1, Math.floor(count * 0.8))
+    tree = treeOf(shown.slice(0, count))
+  }
+  return tree
 }

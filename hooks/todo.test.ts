@@ -238,3 +238,22 @@ test('the pane draws over state saved by an older version of the plugin', async 
     await ui.unmount()
   }
 })
+
+test('a long list is cut to fit the surface and says how many rows are hidden', async ($, on) => {
+  const big = Array.from({ length: 400 }, (_, i) => `(B) 2026-10-01 Задача номер ${i} с длинным текстом про проверку и ремонт +pipeline @owner`).join('\n') + '\n'
+  fakeFs(on, new Map([['todo.txt', big]]))
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  await $.command.run({ command: 'todo', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const texts = (await ui.findAll({ type: 'Text' })).map(row => row.text)
+    const notice = texts.find(t => t.includes('more not shown'))
+    expect(notice).toBeDefined()
+    const hidden = Number(/(\d+) more not shown/.exec(notice ?? '')?.[1])
+    expect(hidden).toBeGreaterThan(0)
+    expect(hidden).toBeLessThan(400)
+    expect(texts.filter(t => t.startsWith('Задача номер')).length).toBe(400 - hidden)
+    expect(texts.some(t => t.includes('400 of 400 open'))).toBe(true)
+    await ui.unmount()
+  }
+})
