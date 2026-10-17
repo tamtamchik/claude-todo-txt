@@ -46,7 +46,7 @@ test('parses and formats todo.txt lines', async () => {
 test('turn.complete adds new tasks and archives finished ones', async ($, on) => {
   const files = new Map<string, string>([[
     'todo.txt',
-    '(A) 2026-10-01 Fix login +auth\n2026-10-02 Write docs\n',
+    '# Backlog\n\n(A) 2026-10-01 Fix login +auth\n2026-10-02 Write docs\n',
   ]])
   fakeFs(on, files)
   fakeTurns(on)
@@ -57,7 +57,7 @@ test('turn.complete adds new tasks and archives finished ones', async ($, on) =>
     return {
       value: {
         isAnswered: true as const,
-        text: '{"add":[{"text":"Add tests for login","priority":"B"}],"done":[1]}',
+        text: '{"add":[{"text":"Add tests for login","priority":"B"}],"done":[2]}',
         usage: USAGE,
       },
     }
@@ -72,8 +72,8 @@ test('turn.complete adds new tasks and archives finished ones', async ($, on) =>
     isAborted: false,
   })
 
-  expect(asked).toContain('1. (A) 2026-10-01 Fix login +auth')
-  expect(files.get('todo.txt')).toBe('2026-10-02 Write docs\n(B) 2026-10-17 Add tests for login\n')
+  expect(asked).toContain('2. (A) 2026-10-01 Fix login +auth')
+  expect(files.get('todo.txt')).toBe('# Backlog\n\n2026-10-02 Write docs\n(B) 2026-10-17 Add tests for login\n')
   expect(files.get('done.txt')).toBe('x 2026-10-17 2026-10-01 Fix login +auth pri:A\n')
 })
 
@@ -123,4 +123,36 @@ test('the pane lists open tasks by priority on each surface', async ($, on) => {
     expect(texts.some(t => t.includes('2 open') && t.includes('1 done'))).toBe(true)
     await ui.unmount()
   }
+})
+
+test('/todo done switches the pane to done.txt and /todo back', async ($, on) => {
+  const files = new Map<string, string>([
+    ['todo.txt', '2026-10-02 Write docs\n'],
+    ['done.txt', 'x 2026-10-03 2026-10-01 Fix login pri:A\n'],
+  ])
+  fakeFs(on, files)
+  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  const run = (args: string) =>
+    $.command.run({ command: 'todo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  const mount = () =>
+    $.ui.mount({
+      plugin: 'todo-txt',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId: 'todo-txt',
+      props: { title: 'todo.txt', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+    })
+
+  expect((await run('done')).text).toBe('done.txt: 1 done')
+  let ui = await mount()
+  let texts = (await ui.findAll({ type: 'Text' })).map(row => row.text)
+  expect(texts).toContain('2026-10-03 2026-10-01 Fix login pri:A')
+  expect(texts.some(t => t.includes('Write docs'))).toBe(false)
+  await ui.unmount()
+
+  expect((await run('')).text).toBe('todo.txt: 1 open, 1 done')
+  ui = await mount()
+  texts = (await ui.findAll({ type: 'Text' })).map(row => row.text)
+  expect(texts).toContain('Write docs')
+  await ui.unmount()
 })

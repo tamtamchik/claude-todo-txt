@@ -9,8 +9,9 @@ const TODO = 'todo.txt'
 const DONE = 'done.txt'
 
 const view = atom({ plugin: 'todo-txt', key: 'view' } as const, {
+  mode: 'open',
   open: [],
-  done: 0,
+  closed: [],
   last: null,
 } as TodoView)
 
@@ -25,12 +26,12 @@ async function readFile($: EngineInterface, path: string): Promise<string> {
   return (await $.fs.exists(path)) ? $.fs.read(path) : ''
 }
 
-async function refresh($: EngineInterface, last: string | null = null): Promise<TodoView> {
+async function refresh($: EngineInterface, change: Partial<TodoView> = {}): Promise<TodoView> {
   const open = openTasks(await readFile($, TODO))
     .sort(byPriority)
     .map(({ priority, text }) => ({ priority, text }))
-  const done = lines(await readFile($, DONE)).length
-  const next: TodoView = { open, done, last: last ?? (await read($, view)).last }
+  const closed = lines(await readFile($, DONE))
+  const next: TodoView = { ...(await read($, view)), open, closed, ...change }
   await update($, view, () => next)
   return next
 }
@@ -40,8 +41,9 @@ async function today($: EngineInterface): Promise<string> {
 }
 
 async function sync($: EngineInterface, prompt: string, answer: string): Promise<string | null> {
-  const todo = lines(await readFile($, TODO))
-  const open = todo.filter(line => !line.startsWith('x '))
+  // the file is rewritten line for line: finished lines go, new ones are appended, the rest stays as it was
+  const todo = (await readFile($, TODO)).split('\n')
+  const open = todo.filter(line => line.trim() !== '' && !line.startsWith('x '))
   const listed = open.map((line, i) => `${i + 1}. ${line}`).join('\n') || '(none)'
   const reply = await $.model.complete({
     model: 'haiku',
@@ -59,7 +61,9 @@ async function sync($: EngineInterface, prompt: string, answer: string): Promise
   const added = change.add.map(t => formatNew(t.text, t.priority, date))
   if (finished.size === 0 && added.length === 0) return null
 
-  await $.fs.write(TODO, [...kept, ...added].join('\n') + '\n')
+  let text = kept.join('\n')
+  if (added.length > 0) text = (text === '' || text.endsWith('\n') ? text : text + '\n') + added.join('\n') + '\n'
+  await $.fs.write(TODO, text)
   if (finished.size > 0) {
     const done = await readFile($, DONE)
     const archived = [...finished].map(line => formatDone(line, date))
@@ -77,8 +81,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'todo',
-      description: 'Show the todo.txt pane, or add a task',
-      argumentHint: '[add <task>]',
+      description: 'Show the todo.txt pane, its done.txt, or add a task',
+      argumentHint: '[done | add <task>]',
     })
     await refresh($)
     void $.ui.open({ id: PANE, title: 'todo.txt' })
@@ -99,7 +103,7 @@ export const register: Register = on => {
     }
     const summary = await sync($, prompt, e.answer)
     if (summary !== null) {
-      await refresh($, summary)
+      await refresh($, { last: summary })
       $.ui.toast(`todo.txt: ${summary}`)
     }
     return result
@@ -115,16 +119,33 @@ export const register: Register = on => {
       await refresh($)
       return { text: `Added: ${line}` }
     }
-    const current = await refresh($)
-    await $.ui.open({ id: PANE, title: 'todo.txt', focus: true })
-    return { text: `todo.txt: ${current.open.length} open, ${current.done} done` }
+    const mode = args === 'done' ? 'done' : 'open'
+    const current = await refresh($, { mode })
+    await $.ui.open({ id: PANE, title: mode === 'done' ? 'done.txt' : 'todo.txt', focus: true })
+    return mode === 'done'
+      ? { text: `done.txt: ${current.closed.length} done` }
+      : { text: `todo.txt: ${current.open.length} open, ${current.closed.length} done` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
-    const { open, done, last } = await read($, view)
+    const { mode, open, closed, last } = await read($, view)
     const color = (priority: string | null) =>
       priority === 'A' ? 'error' : priority === 'B' ? 'warning' : priority === 'C' ? 'suggestion' : 'subtle'
+
+    if (mode === 'done') {
+      return (
+        <Box flexDirection="column">
+          {closed.length === 0 && <Text dimColor>No done tasks.</Text>}
+          {closed.map(line => (
+            <Text wrap="truncate-end" dimColor>
+              {line.replace(/^x /, '')}
+            </Text>
+          ))}
+          <Text dimColor>{closed.length} done · /todo for open tasks</Text>
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="column">
@@ -136,7 +157,7 @@ export const register: Register = on => {
           </Box>
         ))}
         <Text dimColor>
-          {open.length} open · {done} done{last ? ` · last sync: ${last}` : ''}
+          {open.length} open · {closed.length} done{last ? ` · last sync: ${last}` : ''}
         </Text>
       </Box>
     )

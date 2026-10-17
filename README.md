@@ -30,6 +30,7 @@ In the desktop app, where `/plugin` does not run: click **+** next to the prompt
 ## Use
 
 - The `todo.txt` pane opens on session start when the terminal is wide enough for a sidebar. `/todo` opens or focuses it at any width.
+- `/todo done` switches the pane to `done.txt`; `/todo` switches it back.
 - `/todo add <task>` appends a task with today's date.
 - The pane lists open tasks sorted by priority, with the count of open and done tasks and the last sync result.
 
