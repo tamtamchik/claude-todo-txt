@@ -8,14 +8,13 @@ const PANE = 'todo-txt'
 const TODO = 'todo.txt'
 const DONE = 'done.txt'
 
-const view = atom({ plugin: 'todo-txt', key: 'view' } as const, {
-  mode: 'open',
-  open: [],
-  closed: [],
-  filter: [],
-  editing: null,
-  last: null,
-} as TodoView)
+const EMPTY: TodoView = { mode: 'open', open: [], closed: [], filter: [], editing: null, last: null }
+const view = atom({ plugin: 'todo-txt', key: 'view' } as const, EMPTY)
+
+// state outlives a reload of the module: a value saved by an older version may lack fields
+async function current($: EngineInterface): Promise<TodoView> {
+  return { ...EMPTY, ...(await read($, view)) }
+}
 
 const SYSTEM = `You maintain a todo.txt file for a software project.
 You are given the open tasks (numbered), the user's latest prompt and the assistant's answer.
@@ -33,7 +32,7 @@ async function refresh($: EngineInterface, change: Partial<TodoView> = {}): Prom
     .sort(byPriority)
     .map(({ line, priority, text }) => ({ line, priority, text }))
   const closed = lines(await readFile($, DONE)).map(line => line.replace(/^x /, ''))
-  const next: TodoView = { ...(await read($, view)), open, closed, ...change }
+  const next: TodoView = { ...(await current($)), open, closed, ...change }
   await update($, view, () => next)
   return next
 }
@@ -148,13 +147,14 @@ export const register: Register = on => {
     const { Box, Text, Button } = elements
     // mobile draws no Input: there the rows are read-only
     const Input = 'Input' in elements ? elements.Input : undefined
-    const { mode, open, closed, filter, editing, last } = await read($, view)
+    const { mode, open, closed, filter, editing, last } = await current($)
     const color = (priority: string | null) =>
       priority === 'A' ? 'error' : priority === 'B' ? 'warning' : priority === 'C' ? 'suggestion' : 'subtle'
     const toggle = (token: string) =>
       update($, view, v => ({
+        ...EMPTY,
         ...v,
-        filter: v.filter.includes(token) ? v.filter.filter(t => t !== token) : [...v.filter, token],
+        filter: (v.filter ?? []).includes(token) ? v.filter.filter(t => t !== token) : [...(v.filter ?? []), token],
       }))
 
     const all = mode === 'done' ? closed : open.map(task => task.line)
@@ -180,12 +180,12 @@ export const register: Register = on => {
             label={token}
             plain
             dimColor={!filter.includes(token)}
-            variant={filter.includes(token) ? 'primary' : undefined}
+            {...(filter.includes(token) ? { variant: 'primary' as const } : {})}
             onPress={() => void toggle(token)}
           />
         ))}
         {filter.length > 0 && (
-          <Button key="f:clear" label="clear" plain onPress={() => void update($, view, v => ({ ...v, filter: [] }))} />
+          <Button key="f:clear" label="clear" plain onPress={() => void update($, view, v => ({ ...EMPTY, ...v, filter: [] }))} />
         )}
       </Box>
     )
@@ -241,7 +241,7 @@ export const register: Register = on => {
                   label="edit"
                   plain
                   dimColor
-                  onPress={() => void update($, view, v => ({ ...v, editing: task.line }))}
+                  onPress={() => void update($, view, v => ({ ...EMPTY, ...v, editing: task.line }))}
                 />
               )}
             </Box>

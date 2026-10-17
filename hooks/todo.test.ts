@@ -214,3 +214,27 @@ test('edit replaces one line of todo.txt in place', async ($, on) => {
     await ui.unmount()
   }
 })
+
+test('the pane draws over state saved by an older version of the plugin', async ($, on) => {
+  fakeFs(on, new Map([['todo.txt', '(A) 2026-10-01 Fix login +auth\n']]))
+  // until the plugin writes, every read answers what the previous version stored: no `filter`, no `editing`
+  const stale = {
+    mode: 'open',
+    open: [{ line: '(A) 2026-10-01 Fix login +auth', priority: 'A', text: 'Fix login +auth' }],
+    closed: [],
+    last: null,
+  }
+  let isStale = true
+  on('state.get', (_, e, next) => (isStale ? { value: { value: stale, version: 1 } } : next(e)))
+  on('state.set', (_, e, next) => {
+    isStale = false
+    return next(e)
+  })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const texts = async () => (await ui.findAll({ type: 'Text' })).map(row => row.text).join(' | ')
+    expect(await texts()).toContain('Fix login')
+    expect(await texts()).toContain('1 of 1 open')
+    await ui.unmount()
+  }
+})
